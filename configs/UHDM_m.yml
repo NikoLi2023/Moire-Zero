@@ -1,0 +1,44 @@
+data:
+    type: "UHDMdataset"  
+    train_dataset:                    # The folder name of triain dataset (e.g., uhdm, fhdmi)
+    val_dataset:                      # The folder name of val dataset
+    patch_size: 768                   # The patch size of the image used during training
+    channels: 3                       # Input image channels
+    num_workers: 4
+    data_dir:                         # Enter the parent folder path (e.g., /abc/def for /abc/def/uhdm)
+    train_data_csv: "metadata.csv"    # A CSV file containing the paths to the moiré and clean images (0000_gt.jpg, 0000_moire.jpg)
+    val_data_csv: "metadata.csv"      # A CSV file with a few sample validation pairs (moiré and clean images)
+    data_type: "UHDM"                 # Please specify the type of the dataset (select from AIM/UHDM/FHDMi/TIP)
+    
+model:
+    img_channel: 3
+    width: 32                         # The initial channel number of encoder
+    enc_blk_nums: [2, 2, 4, 6]        # The number of MSDAB in the encoder
+    middle_blk_num: 1                 # the number of MSLKB 
+    dec_blk_nums: [6, 4, 2, 2]        # The number of MSDAB in the decoer
+    layernorm: true
+    tlc: 2.0
+    msdab_s: true
+
+training:
+    name: "MZNet_M_UHDM"       
+    seed: 42
+    batch_size: 2
+    accumulation_steps: 4
+    n_epochs: 700                      # The total training epochs
+    validation_freq: 10000             # Validation interval
+    resume:                            # The checkpoint (ckpt) to resume training 
+    result_folder:                     # Folder for saving training results (e.g., ckpt, image)
+
+eval:
+    ckpt:                              # The checkpoint path to eval
+    result_folder:                     # Folder for saving eval results
+    save_img: False                    # Whether to save images during evaluation
+
+optim:
+    weight_decay: 0.0
+    optimizer: "Adam" 
+    lr: 0.0008 
+    amsgrad: False
+    eps: 0.00000001
+

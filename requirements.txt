@@ -1,0 +1,10 @@
+numpy==1.24.4
+einops==0.8.1
+lpips==0.1.4
+opencv-python==4.11.0.86
+scikit-image==0.19.2
+tqdm==4.67.1
+wandb
+pyyaml
+pandas
+ptflops
