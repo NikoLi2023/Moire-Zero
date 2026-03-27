@@ -534,14 +534,14 @@ class MZNet(nn.Module):
         self.ending = nn.Conv2d(in_channels=width, out_channels=img_channel, kernel_size=3, padding=1, stride=1, groups=1,
                               bias=True)
 
-        self.encoders = nn.ModuleList()
+        self.encoders = nn.ModuleList() #pytorch的ModuleList是一个有序的容器，类似于Python的list，但它专门用于存储PyTorch的模块（如层、子网络等）。当你将模块添加到ModuleList中时，它会自动注册这些模块，使得它们能够正确地参与到模型的训练和推理过程中。
         self.decoders = nn.ModuleList()
         self.middle_blks = nn.ModuleList()
         self.ups = nn.ModuleList()
         self.downs = nn.ModuleList()
         
-        # FFSC
-        self.combine_conv_level3 = nn.Conv2d(in_channels=480, out_channels=256, kernel_size=1)
+        # FFSC Feature Fusion-Based Skip Connection (FFSC)
+        self.combine_conv_level3 = nn.Conv2d(in_channels=480, out_channels=256, kernel_size=1)# 1x1卷积层，输入通道数为480，输出通道数为256，卷积核大小为1x1，步幅为1，填充为0，分组数为1，使用偏置项。这个层的作用是将输入的480个特征图压缩到256个特征图，同时保持空间尺寸不变。
         self.combine_conv_level2 = nn.Conv2d(in_channels=480, out_channels=128, kernel_size=1)
         self.combine_conv_level1 = nn.Conv2d(in_channels=480, out_channels=64, kernel_size=1)
         self.combine_conv_level0 = nn.Conv2d(in_channels=480, out_channels=32, kernel_size=1)
@@ -605,7 +605,7 @@ class MZNet(nn.Module):
     def forward(self, inp):
         B, C, H, W = inp.shape
         inp = self.check_image_size(inp)
-        unshuffle_inp = torch.pixel_unshuffle(inp, 2)
+        unshuffle_inp = torch.pixel_unshuffle(inp, 2)#将特征图的空间尺寸减半，通道数增加4倍。具体来说，如果输入特征图的尺寸为(B, C, H, W)，则输出特征图的尺寸将变为(B, 4*C, H/2, W/2)。这个操作通过将输入特征图划分为2x2的块，并将这些块沿着通道维度进行拼接来实现。这种操作在一些图像处理任务中非常有用，可以帮助模型更好地捕捉局部信息。
         x = self.intro(unshuffle_inp)
 
         encs = []
@@ -617,7 +617,7 @@ class MZNet(nn.Module):
 
         x = self.middle_blks(x)
         
-        # FFSC
+        # FFSC Feature Fusion-Based Skip Connection (FFSC)
         combined_list=[]
         combined_3=torch.cat([F.interpolate(encs[0], scale_factor=0.125, mode='bilinear'),
                               F.interpolate(encs[1], scale_factor=0.25, mode='bilinear'), 
@@ -668,10 +668,10 @@ class MZNet(nn.Module):
             if i == 1 or i == 2:
                 if i == 1:
                     out2 = self.decoder_out2(x)
-                    out2 = torch.pixel_shuffle(out2, 2)    
+                    out2 = torch.pixel_shuffle(out2, 2)#将特征图的空间尺寸增加一倍，通道数减少4倍。具体来说，如果输入特征图的尺寸为(B, C, H, W)，则输出特征图的尺寸将变为(B, C/4, 2*H, 2*W)。这个操作通过将输入特征图沿着通道维度划分为4个部分，并将这些部分按照2x2的块进行重组来实现。这种操作在一些图像处理任务中非常有用，可以帮助模型更好地捕捉全局信息。
                 else:
                     out3 = self.decoder_out1(x)
-                    out3 = torch.pixel_shuffle(out3, 2)
+                    out3 = torch.pixel_shuffle(out3, 2)#将特征图的空间尺寸增加一倍，通道数减少4倍。具体来说，如果输入特征图的尺寸为(B, C, H, W)，则输出特征图的尺寸将变为(B, C/4, 2*H, 2*W)。这个操作通过将输入特征图沿着通道维度划分为4个部分，并将这些部分按照2x2的块进行重组来实现。这种操作在一些图像处理任务中非常有用，可以帮助模型更好地捕捉全局信息。
                     
         x = self.final_refine(x)
         x = self.ending(x)
