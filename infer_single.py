@@ -1,4 +1,5 @@
 import argparse
+import time
 import os
 import yaml
 import torch
@@ -54,7 +55,7 @@ def load_checkpoint_to_model(ckpt_path, model, device):
         model.load_state_dict(cleaned, strict=False)
 
 
-def infer_single(ckpt_path, image_path, out_path, config_filename='UHDM_m.yml', device=None):
+def infer_single(ckpt_path, image_path, out_path, config_filename='UHDM_m.yml', device=None,saveOnnx: bool=False):
     """Run inference for a single image using the given checkpoint.
     Only requires: checkpoint path, input image path, output image path.
     """
@@ -71,7 +72,7 @@ def infer_single(ckpt_path, image_path, out_path, config_filename='UHDM_m.yml', 
     config.device = dev
 
     # build model
-    print('Creating model...')
+    print('Creating model...'+str(config.device))
     model = MZNetLocal(config)
     model.to(dev)
     model.eval()
@@ -80,6 +81,7 @@ def infer_single(ckpt_path, image_path, out_path, config_filename='UHDM_m.yml', 
     print(f'Loading checkpoint: {ckpt_path}')
     load_checkpoint_to_model(ckpt_path, model, dev)
     print('Checkpoint loaded.')
+
 
     # load image
     img = Image.open(image_path).convert('RGB')
@@ -93,9 +95,10 @@ def infer_single(ckpt_path, image_path, out_path, config_filename='UHDM_m.yml', 
     if pad_h > 0 or pad_w > 0:
         t = F.pad(t, (0, pad_w, 0, pad_h), mode='reflect')
 
+    startTime=time.time()
     # forward
-    with torch.no_grad():
-        out = model(t)
+    with torch.no_grad():  # 开启一个上下文，在该上下文内 PyTorch 不会计算梯度或记录计算图，用于推理以节省显存和计算时间。
+        out = model(t)  # 将输入张量 t 传入模型前向计算，得到模型输出 out。输出类型取决于模型实现（可能是 tuple/list/dict）。
         if isinstance(out, dict):
             if 'pred_x' in out:
                 pred = out['pred_x']
@@ -106,16 +109,75 @@ def infer_single(ckpt_path, image_path, out_path, config_filename='UHDM_m.yml', 
         else:
             raise RuntimeError('Unexpected model output type')
 
-        pred = torch.clamp(pred, 0.0, 1.0)
+        pred = torch.clamp(pred, 0.0, 1.0)  # 把模型输出张量的像素值限制在合法的图像范围 [0.0, 1.0]，以便后续保存/可视化且避免超出范围的数值。
+    
+    end_time = time.time()
+    elapsed_time = end_time - startTime
+    print(f"Elapsed time: {elapsed_time:.2f} seconds")
 
     # crop back to original size if padded
-    if 'orig_h' in locals() and (orig_h != pred.shape[2] or orig_w != pred.shape[3]):
+    if "orig_h" in locals() and (orig_h != pred.shape[2] or orig_w != pred.shape[3]):
         pred = pred[:, :, :orig_h, :orig_w]
 
     # save
     os.makedirs(os.path.dirname(out_path) or '.', exist_ok=True)
     tvu.save_image(pred, out_path)
     print('Saved:', out_path)
+
+    # optional ONNX export
+    if saveOnnx:
+        try:
+            import importlib
+            if importlib.util.find_spec('onnx') is None:
+                print('ONNX package not installed, skipping ONNX export.')
+            else:
+                onnx_path = out_path.replace('.jpg', '.onnx')
+
+                class _ONNXWrapper(torch.nn.Module):
+                    def __init__(self, m):
+                        super().__init__()
+                        self.m = m
+                    def forward(self, x):
+                        out = self.m(x)
+                        if isinstance(out, dict):
+                            return out.get('pred_x', list(out.values())[-1])
+                        elif isinstance(out, (list, tuple)):
+                            return out[2]
+                        return out
+
+                # Move model to CPU (ensures parameters are on CPU) and free GPU memory
+                try:
+                    model.cpu()
+                except Exception:
+                    pass
+                if torch.cuda.is_available():
+                    try:
+                        torch.cuda.empty_cache()
+                    except Exception:
+                        pass
+
+                wrapper = _ONNXWrapper(model).cpu()
+                wrapper.eval()
+
+                example_input_cpu = t.cpu()
+
+                with torch.no_grad():
+                    torch.onnx.export(
+                        wrapper,
+                        example_input_cpu,
+                        onnx_path,
+                        export_params=True,
+                        opset_version=17,
+                        do_constant_folding=True,
+                        input_names=['input'],
+                        output_names=['pred'],
+                        dynamic_axes={'input': {0: 'batch', 2: 'height', 3: 'width'},
+                                      'pred': {0: 'batch', 2: 'height', 3: 'width'}},
+                        verbose=False,
+                    )
+                print('ONNX saved (CPU):', onnx_path)
+        except Exception as e:
+            print('ONNX export failed:', e)
 
 
 if __name__ == '__main__':
@@ -132,4 +194,10 @@ if __name__ == '__main__':
 
     ckpt = r"C:\Codes\Moire-Zero\ckpt\MZNet_M_UHDM.pth"
 
+    start_time = time.time()
+
     infer_single(ckpt, image_path, out_path)
+    
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    print(f"Whole Elapsed time: {elapsed_time:.2f} seconds")
