@@ -49,7 +49,7 @@ class Net(nn.Module):
         data_dict["out2"] = out2
         data_dict["out3"] = out3
         return data_dict
-
+    
 
 class Pipeline(object):
     def __init__(self, args, config):

@@ -190,14 +190,14 @@ if __name__ == '__main__':
     # args = parser.parse_args()
 
     image_path = r"C:\Codes\Moire-Zero\Moire照片\0405_moire.jpg"
-    out_path = r"C:\Codes\Moire-Zero\Moire照片\0405_moire_out.jpg"
+    out_path = r"C:\Codes\Moire-Zero\Moire照片\0405_moire_out.png"
 
     ckpt = r"C:\Codes\Moire-Zero\ckpt\MZNet_M_UHDM.pth"
 
     start_time = time.time()
 
     infer_single(ckpt, image_path, out_path)
-    
+
     end_time = time.time()
     elapsed_time = end_time - start_time
     print(f"Whole Elapsed time: {elapsed_time:.2f} seconds")

@@ -9,8 +9,7 @@ from models import Pipeline,  MZNetLocal
 
 def parse_args_and_config():
     parser = argparse.ArgumentParser(description='Training MZNet')
-    parser.add_argument("--config", default='UHDM.yml', type=str,
-                        help="Path to the config file")
+    parser.add_argument("--config", default='UHDM_m_1.yml', type=str, help="Path to the config file")
     args = parser.parse_args()
   
     with open(os.path.join("configs", args.config), "r") as f:

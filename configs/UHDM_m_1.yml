@@ -1,0 +1,43 @@
+data:
+    type: "UHDMdataset"  
+    train_dataset: test_origin
+    val_dataset: test_origin
+    patch_size: 768
+    channels: 3
+    num_workers: 4
+    data_dir: "C:/Codes/Moire-Zero"
+    train_data_csv: "metadata.csv"
+    val_data_csv: "metadata.csv"
+    data_type: "UHDM"
+    
+model:
+    img_channel: 3
+    width: 32
+    enc_blk_nums: [2, 2, 4, 6]
+    middle_blk_num: 1
+    dec_blk_nums: [6, 4, 2, 2]
+    layernorm: true
+    tlc: 2.0
+    msdab_s: true
+
+training:
+    name: "MZNet_M_UHDM_local"
+    seed: 42
+    batch_size: 2
+    accumulation_steps: 4
+    n_epochs: 100
+    validation_freq: 1000
+    resume: ""
+    result_folder: "results"
+
+eval:
+    ckpt: ""
+    result_folder: ""
+    save_img: False
+
+optim:
+    weight_decay: 0.0
+    optimizer: "Adam"
+    lr: 0.0008
+    amsgrad: False
+    eps: 0.00000001
