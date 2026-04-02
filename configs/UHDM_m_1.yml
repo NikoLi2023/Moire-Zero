@@ -5,7 +5,7 @@ data:
     patch_size: 768
     channels: 3
     num_workers: 4
-    data_dir: "C:/Codes/Moire-Zero"
+    data_dir: ""
     train_data_csv: "metadata.csv"
     val_data_csv: "metadata.csv"
     data_type: "UHDM"
@@ -25,9 +25,9 @@ training:
     seed: 42
     batch_size: 2
     accumulation_steps: 4
-    n_epochs: 100
+    n_epochs: 2
     validation_freq: 1000
-    resume: ""
+    resume: "weights/MZNet_M_UHDM.pth"    # set later to resume
     result_folder: "results"
 
 eval:
