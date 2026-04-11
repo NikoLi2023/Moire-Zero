@@ -113,7 +113,7 @@ def infer_single(ckpt_path, image_path, out_path, config_filename='UHDM_m.yml', 
     
     end_time = time.time()
     elapsed_time = end_time - startTime
-    print(f"Elapsed time: {elapsed_time:.2f} seconds")
+    print(f"Inference Elapsed time: {elapsed_time:.2f} seconds")
 
     # crop back to original size if padded
     if "orig_h" in locals() and (orig_h != pred.shape[2] or orig_w != pred.shape[3]):
@@ -189,14 +189,14 @@ if __name__ == '__main__':
     # parser.add_argument('--device', default=None, help='cuda or cpu (e.g. cuda:0)')
     # args = parser.parse_args()
 
-    image_path = r"C:\Codes\Moire-Zero\Moire照片\0405_moire.jpg"
-    out_path = r"C:\Codes\Moire-Zero\Moire照片\0405_moire_out.png"
+    image_path = r"test_origin\train\0056_moire.jpg"
+    out_path = r"results\0056_moire_out.jpg"
 
-    ckpt = r"C:\Codes\Moire-Zero\ckpt\MZNet_M_UHDM.pth"
+    ckpt = r"weights\MZNet_S_UHDM.pth"
 
     start_time = time.time()
 
-    infer_single(ckpt, image_path, out_path)
+    infer_single(ckpt, image_path, out_path,config_filename="UHDM_s_1.yml", device="cuda:0",saveOnnx=True)
 
     end_time = time.time()
     elapsed_time = end_time - start_time

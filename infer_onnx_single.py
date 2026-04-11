@@ -65,8 +65,12 @@ def infer_onnx_single(
         input_np = np.pad(input_np, pad, mode="reflect")
 
     # 运行 ONNX
+    timeStart = time.time()
     input_name = session.get_inputs()[0].name
     outputs = session.run(None, {input_name: input_np})
+    timeEnd = time.time()
+    elapsed_time = timeEnd - timeStart
+    print(f"ONNX 推理时间: {elapsed_time:.2f} 秒")
     pred_np = outputs[0]  # 期望形状 1,C,H,W
 
     # crop 回原始尺寸（如果做了 pad）
@@ -95,14 +99,18 @@ if __name__ == "__main__":
     # parser.add_argument('--pad', type=int, default=32, help='pad to multiple of this value (default 32)')
     # args = parser.parse_args()
 
-    onnx_file = "Moire照片/0405_moire_out.onnx"
-    image_file = "C:/Codes/Moire-Zero/Moire照片/0405_moire.jpg"
-    output_file = "C:/Codes/Moire-Zero/Moire照片/0405_moire_out_cuda.jpg"
+
+    image_path = r"test_origin\train\0056_moire.jpg"
+    out_path = r"results\0056_moire_out_Onnx.png"
+
+    onnx_file = "results/0056_moire_out.onnx"
+
+    # output_file = "C:/Codes/Moire-Zero/Moire照片/0405_moire_out_cuda.jpg"
     # record the elapsed time
 
     start_time = time.time()
 
-    infer_onnx_single(onnx_file, image_file, output_file)
+    infer_onnx_single(onnx_file, image_path, out_path,device="cuda")
     end_time = time.time()
     elapsed_time = end_time - start_time
     print(f"Whole Onnx Elapsed time: {elapsed_time:.2f} seconds")
