@@ -23,9 +23,9 @@ model:
 training:
     name: "MZNet_M_UHDM_local"
     seed: 42
-    batch_size: 2
+    batch_size: 5
     accumulation_steps: 4
-    n_epochs: 2
+    n_epochs: 200
     validation_freq: 1000
     resume: "weights/MZNet_M_UHDM.pth"    # set later to resume
     result_folder: "results"

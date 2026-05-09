@@ -10,6 +10,7 @@
 简单的命令行用法也在 __main__ 中提供。
 """
 
+import json
 from PIL import Image
 import numpy as np
 import os
@@ -22,10 +23,20 @@ def infer_onnx_single(
     out_path: str,
     device: str = "cpu",
     pad_to: int = 32,
+    warmup_runs: int = 5,
+    benchmark_runs: int = 30,
+    enable_profile: bool = False,
+    strict_cuda: bool = False,
 ):
     """
     使用 ONNX 模型对单张图像运行推理并保存输出图像。
     返回：输出图像的 numpy 数组（H, W, C，uint8）。
+
+    参数说明：
+    - warmup_runs: 预热次数，不计入平均耗时
+    - benchmark_runs: 正式计时次数（仅统计 session.run）
+    - enable_profile: 是否启用 ORT profiling 并输出 provider 摘要
+    - strict_cuda: 请求 CUDA 且不可用时是否直接报错
     """
     try:
         import onnxruntime as ort
@@ -34,18 +45,31 @@ def infer_onnx_single(
             "请先安装 onnxruntime (CPU: pip install onnxruntime) 才能使用此脚本。"
         ) from e
 
-    # 选择 provider
-    providers = None
-    if device and "cuda" in device.lower():
-        # 如果想要在 GPU 上运行，需要安装 onnxruntime-gpu 并确保 provider 可用
-        try:
-            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
-        except Exception:
-            providers = ["CPUExecutionProvider"]
+    available_providers = ort.get_available_providers()
+    print("ORT available providers:", available_providers)
+
+    # 选择 provider（并显式处理 CUDA 回退）
+    want_cuda = bool(device and "cuda" in device.lower())
+    if want_cuda and "CUDAExecutionProvider" in available_providers:
+        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    elif want_cuda:
+        msg = (
+            "Requested CUDA but CUDAExecutionProvider is unavailable. "
+            "Falling back to CPUExecutionProvider."
+        )
+        if strict_cuda:
+            raise RuntimeError(msg)
+        print(msg)
+        providers = ["CPUExecutionProvider"]
     else:
         providers = ["CPUExecutionProvider"]
 
-    session = ort.InferenceSession(onnx_path, providers=providers)
+    sess_options = ort.SessionOptions()
+    if enable_profile:
+        sess_options.enable_profiling = True
+
+    session = ort.InferenceSession(onnx_path, sess_options=sess_options, providers=providers)
+    print("ORT session providers (priority):", session.get_providers())
 
     # 读取图片并转换为 float32 [0,1], NCHW
     img = Image.open(image_path).convert("RGB")
@@ -58,19 +82,31 @@ def infer_onnx_single(
     pad_h = (pad_to - (h0 % pad_to)) % pad_to
     pad_w = (pad_to - (w0 % pad_to)) % pad_to
     if pad_h > 0 or pad_w > 0:
-        # pad 格式：((before_dim0, after_dim0), ...)
-        # 对 N,C,H,W 四维张量，只在 H 和 W 维度 pad
         pad = ((0, 0), (0, 0), (0, pad_h), (0, pad_w))
-        # np.pad 的 pad_width 需要针对每轴给出元组
         input_np = np.pad(input_np, pad, mode="reflect")
 
-    # 运行 ONNX
-    timeStart = time.time()
     input_name = session.get_inputs()[0].name
-    outputs = session.run(None, {input_name: input_np})
-    timeEnd = time.time()
-    elapsed_time = timeEnd - timeStart
-    print(f"ONNX 推理时间: {elapsed_time:.2f} 秒")
+
+    # warmup
+    for _ in range(max(0, warmup_runs)):
+        session.run(None, {input_name: input_np})
+
+    # benchmark（仅统计 session.run）
+    run_lat_ms = []
+    outputs = None
+    for _ in range(max(1, benchmark_runs)):
+        t0 = time.perf_counter()
+        outputs = session.run(None, {input_name: input_np})
+        t1 = time.perf_counter()
+        run_lat_ms.append((t1 - t0) * 1000.0)
+
+    lat_np = np.array(run_lat_ms, dtype=np.float64)
+    print(
+        "ORT latency (session.run only) ms: "
+        f"mean={lat_np.mean():.2f}, p50={np.percentile(lat_np, 50):.2f}, "
+        f"p90={np.percentile(lat_np, 90):.2f}, min={lat_np.min():.2f}, max={lat_np.max():.2f}"
+    )
+
     pred_np = outputs[0]  # 期望形状 1,C,H,W
 
     # crop 回原始尺寸（如果做了 pad）
@@ -84,6 +120,26 @@ def infer_onnx_single(
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     out_pil.save(out_path)
+
+    # profiling 摘要（可用于判断是否存在 CPU 回退）
+    if enable_profile:
+        profile_file = session.end_profiling()
+        print("ORT profile saved:", profile_file)
+        try:
+            with open(profile_file, "r", encoding="utf-8") as f:
+                profile_data = json.load(f)
+
+            provider_count = {}
+            for item in profile_data:
+                provider = item.get("args", {}).get("provider")
+                if provider:
+                    provider_count[provider] = provider_count.get(provider, 0) + 1
+            if provider_count:
+                print("ORT profile provider usage:", provider_count)
+            else:
+                print("ORT profile provider usage: unavailable in profile entries.")
+        except Exception as e:
+            print("Failed to parse ORT profile JSON:", e)
 
     return out_img
 
@@ -100,17 +156,26 @@ if __name__ == "__main__":
     # args = parser.parse_args()
 
 
-    image_path = r"test_origin\train\0056_moire.jpg"
-    out_path = r"results\0056_moire_out_Onnx.png"
+    image_path = r"D:\Codes\UHDM\Moire\0405_moire.jpg"
+    out_path = r"results\0405_moire_out_Onnx.png"
 
-    onnx_file = "results/0056_moire_out.onnx"
+    onnx_file = r"results\_moire_out_FP32.onnx"
 
     # output_file = "C:/Codes/Moire-Zero/Moire照片/0405_moire_out_cuda.jpg"
     # record the elapsed time
 
     start_time = time.time()
 
-    infer_onnx_single(onnx_file, image_path, out_path,device="cuda")
+    infer_onnx_single(
+        onnx_file,
+        image_path,
+        out_path,
+        device="cuda",
+        warmup_runs=5,
+        benchmark_runs=30,
+        enable_profile=True,
+        strict_cuda=False,
+    )
     end_time = time.time()
     elapsed_time = end_time - start_time
     print(f"Whole Onnx Elapsed time: {elapsed_time:.2f} seconds")

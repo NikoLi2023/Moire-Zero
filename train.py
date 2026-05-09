@@ -5,13 +5,14 @@ import torch
 import torch.utils.data
 import numpy as np
 import datasets
-from models import Pipeline,  MZNetLocal
+from models import Pipeline, MZNetLocal
+
 
 def parse_args_and_config():
     parser = argparse.ArgumentParser(description='Training MZNet')
     parser.add_argument("--config", default='UHDM_m_1.yml', type=str, help="Path to the config file")
     args = parser.parse_args()
-  
+
     with open(os.path.join("configs", args.config), "r") as f:
         config = yaml.safe_load(f)
     new_config = dict2namespace(config)
@@ -33,7 +34,6 @@ def dict2namespace(config):
 def main():
     args, config = parse_args_and_config()
 
-
     # # setup device to run
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
@@ -45,7 +45,7 @@ def main():
     np.random.seed(config.training.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(config.training.seed)
-    torch.backends.cudnn.benchmark = True #是 CUDA 深度神经网络库（cuDNN）的自动优化开关，用于自动选择最优卷积算法来加速训练。
+    torch.backends.cudnn.benchmark = True  # 是 CUDA 深度神经网络库（cuDNN）的自动优化开关，用于自动选择最优卷积算法来加速训练。
 
     # data loading
     print("=> Using dataset '{}'".format(config.data.train_dataset))
@@ -53,11 +53,10 @@ def main():
 
     # create model
     print("=> Creating model...")
-    pipeline = Pipeline(args, config)   
+    pipeline = Pipeline(args, config)
     print(sum(p.numel() for p in pipeline.model.parameters()))
     pipeline.train(DATASET)
 
 
 if __name__ == "__main__":
     main()
-
