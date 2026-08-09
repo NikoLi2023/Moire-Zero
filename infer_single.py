@@ -167,37 +167,32 @@ def infer_single(
     pad_h = (32 - (orig_h % 32)) % 32
     pad_w = (32 - (orig_w % 32)) % 32
     if pad_h > 0 or pad_w > 0:
-        t = F.pad(t, (0, pad_w, 0, pad_h), mode="reflect")
+        # t = F.pad(t, (0, pad_w, 0, pad_h), mode="reflect")
+        t = F.pad(t, (0, pad_w, 0, pad_h), mode="constant",value=0.0)
 
     #创建一个Tdummy其数据结构和t一样，只是数值随机
     Tdummy = torch.randn_like(t)
 
-    count=0
-
-    while(count<10):
-        startTime = time.time()
-        # forward
-        with torch.no_grad(), torch.autocast(device_type='cuda',
-                                             dtype=torch.float16):  # 开启一个上下文，在该上下文内 PyTorch 不会计算梯度或记录计算图，用于推理以节省显存和计算时间。
-            out = model(Tdummy)  # 将输入张量 t 传入模型前向计算，得到模型输出 out。输出类型取决于模型实现（可能是 tuple/list/dict）。
-            if isinstance(out, dict):
-                if 'pred_x' in out:
-                    pred = out['pred_x']
-                else:
-                    pred = list(out.values())[-1]
-            elif isinstance(out, (list, tuple)):
-                pred = out[2]
+    startTime = time.time()
+    # forward
+    with torch.no_grad(), torch.autocast(device_type='cuda',
+                                         dtype=torch.float16):  # 开启一个上下文，在该上下文内 PyTorch 不会计算梯度或记录计算图，用于推理以节省显存和计算时间。
+        out = model(Tdummy)  # 将输入张量 t 传入模型前向计算，得到模型输出 out。输出类型取决于模型实现（可能是 tuple/list/dict）。
+        if isinstance(out, dict):
+            if 'pred_x' in out:
+                pred = out['pred_x']
             else:
-                raise RuntimeError('Unexpected model output type')
+                pred = list(out.values())[-1]
+        elif isinstance(out, (list, tuple)):
+            pred = out[2]
+        else:
+            raise RuntimeError('Unexpected model output type')
 
-            pred = torch.clamp(pred, 0.0, 1.0)  # 把模型输出张量的像素值限制在合法的图像范围 [0.0, 1.0]，以便后续保存/可视化且避免超出范围的数值。
+        pred = torch.clamp(pred, 0.0, 1.0)  # 把模型输出张量的像素值限制在合法的图像范围 [0.0, 1.0]，以便后续保存/可视化且避免超出范围的数值。
 
-        end_time = time.time()
-        elapsed_time = end_time - startTime
-        print(f"Inference Elapsed time1: {elapsed_time:.2f} seconds")
-
-
-
+    end_time = time.time()
+    elapsed_time = end_time - startTime
+    print(f"Inference Elapsed time1: {elapsed_time:.2f} seconds")
     # Forward
     start = time.time()
     with torch.no_grad():
@@ -236,7 +231,7 @@ def infer_single(
     # Optional ONNX export
     if save_onnx:
         try:
-            export_onnx(model, t, out_path, onnx_path=onnx_path)
+            export_onnx(model, t, out_path, onnx_path="moire.onnx")
         except Exception as e:
             print("ONNX export failed:", e)
 
@@ -269,19 +264,24 @@ if __name__ == "__main__":
     #     using_fp16=args.fp16,
     # )
 
-    infer_single(
-        ckpt_path=r"results/test_origin/ckpt/200.pth.tar",
-        image_path=r"D:\Codes\Moire-Zero\test_origin - 副本\train\0033_moire.jpg",
-        out_path="results/2_moire_demoire.jpg",
-        config_filename="UHDM_m_1.yml",
-        device="cuda:0",
-        save_onnx=False,
-        onnx_path="",
-        using_fp16=False,
-    )
 
-    # src=cv2.imread("results/_moire_demoire.tif", cv2.IMREAD_COLOR)
-    # cv2.imwrite(r"D:\Raw Data 8Bit(Remove Moire)\31WRF_S22U_WD518\oz_8bit.tif", src)
+    imgList=[img for img in os.listdir(r"C:\Users\1\Desktop\origin") if img.endswith(".tif")]
+    renameList = [f"{os.path.splitext(i)[0]}_Demoire.tif" for i in imgList]
 
+
+    for i in range(len(imgList)):
+        img = imgList[i]
+        out = renameList[i]
+        infer_single(
+            ckpt_path=r"results/ReferenceRe/ckpt/400.pth.tar",
+            image_path=rf"C:\Users\1\Desktop\origin\{img}",
+            out_path=fr"C:\Users\1\Desktop\origin/{out}",
+            config_filename="UHDM_m_1.yml",
+            device="cuda:0",
+            save_onnx=True,
+            onnx_path="results",
+            using_fp16=False,
+        )
+        break
     total_elapsed = time.time() - total_start
     print(f"Total elapsed: {total_elapsed:.3f} s")

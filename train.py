@@ -59,4 +59,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    print("Starting training...")
+    main() 
+    print("Training finished!")
