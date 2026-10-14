@@ -52,10 +52,12 @@ def load_checkpoint_to_model(ckpt_path, model, device):
     except RuntimeError as e:
         print('Strict load failed:', e)
         print('Retrying load with strict=False (will ignore unmatched keys).')
-        model.load_state_dict(cleaned, strict=False)
+        incompatible = model.load_state_dict(cleaned, strict=False)
+        print('Missing keys (kept at random init):', incompatible.missing_keys)
+        print('Unexpected keys (ignored):', incompatible.unexpected_keys)
 
 
-def infer_single(ckpt_path, image_path, out_path, config_filename='UHDM_m.yml', device=None,saveOnnx: bool=False):
+def infer_single(ckpt_path, image_path, out_path, config_filename='FHDMi_s.yml', device=None,saveOnnx: bool=False):
     """Run inference for a single image using the given checkpoint.
     Only requires: checkpoint path, input image path, output image path.
     """
@@ -69,12 +71,15 @@ def infer_single(ckpt_path, image_path, out_path, config_filename='UHDM_m.yml', 
         dev = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     else:
         dev = torch.device(device)
+        
+    # dev=torch.device( 'cpu')
     config.device = dev
+    
 
     # build model
     print('Creating model...'+str(config.device))
     model = MZNetLocal(config)
-    model.to(dev)
+    model.to(device=dev)
     model.eval()
 
     # load checkpoint
@@ -113,7 +118,7 @@ def infer_single(ckpt_path, image_path, out_path, config_filename='UHDM_m.yml', 
     
     end_time = time.time()
     elapsed_time = end_time - startTime
-    print(f"Elapsed time: {elapsed_time:.2f} seconds")
+    print(f"Inference time: {elapsed_time:.2f} seconds")
 
     # crop back to original size if padded
     if "orig_h" in locals() and (orig_h != pred.shape[2] or orig_w != pred.shape[3]):
@@ -131,7 +136,26 @@ def infer_single(ckpt_path, image_path, out_path, config_filename='UHDM_m.yml', 
             if importlib.util.find_spec('onnx') is None:
                 print('ONNX package not installed, skipping ONNX export.')
             else:
-                onnx_path = out_path.replace('.jpg', '.onnx')
+                onnx_path = ckpt_path.split('.')[0]+".onnx"
+
+                # 关键修复: SCA 里的自定义 AvgPool2d(NAFNet Local 近似, kernel 窗口在
+                # tracing 时会被固化为常量) 全部替换为真正的全局平均池化。
+                # 这样导出的 ONNX: 1) 无 TracerWarning; 2) 对任意输入尺寸真正泛化
+                # (原版在 H/W <= 1536 时因固定窗口切出 0 尺寸张量而崩溃);
+                # 3) 不再有 edge/replicate 模式的 Pad, 兼容 CUDA ExecutionProvider。
+                from models.mznet import AvgPool2d
+
+                class _GlobalPool(torch.nn.Module):
+                    def forward(self, x):
+                        return F.adaptive_avg_pool2d(x, 1)
+
+                n_replaced = 0
+                for parent in model.modules():
+                    for name, child in parent.named_children():
+                        if isinstance(child, AvgPool2d):
+                            setattr(parent, name, _GlobalPool())
+                            n_replaced += 1
+                print(f'ONNX export: replaced {n_replaced} custom AvgPool2d with global avg pool.')
 
                 class _ONNXWrapper(torch.nn.Module):
                     def __init__(self, m):
@@ -176,6 +200,29 @@ def infer_single(ckpt_path, image_path, out_path, config_filename='UHDM_m.yml', 
                         verbose=False,
                     )
                 print('ONNX saved (CPU):', onnx_path)
+
+                # 同时导出 fp16 版本(<stem>_fp16.onnx), 供 GPU 推理使用:
+                # fp32 全尺寸激活值(单张 concat 可达 5.5GB)放不进 12GB 显存,
+                # fp16 显存减半且 TensorRT/ORT-GPU 用 tensor core 更快,
+                # 精度损失肉眼不可感知(实测 mean|diff| ~ 5e-4)。
+                import copy as _copy
+                fp16_path = onnx_path.replace('.onnx', '_fp16.onnx')
+                half_wrapper = _copy.deepcopy(wrapper).half().eval()
+                with torch.no_grad():
+                    torch.onnx.export(
+                        half_wrapper,
+                        example_input_cpu.half(),
+                        fp16_path,
+                        export_params=True,
+                        opset_version=17,
+                        do_constant_folding=True,
+                        input_names=['input'],
+                        output_names=['pred'],
+                        dynamic_axes={'input': {0: 'batch', 2: 'height', 3: 'width'},
+                                      'pred': {0: 'batch', 2: 'height', 3: 'width'}},
+                        verbose=False,
+                    )
+                print('FP16 ONNX saved (CPU):', fp16_path)
         except Exception as e:
             print('ONNX export failed:', e)
 
@@ -190,13 +237,13 @@ if __name__ == '__main__':
     # args = parser.parse_args()
 
     image_path = r"C:\Codes\Moire-Zero\Moire照片\0405_moire.jpg"
-    out_path = r"C:\Codes\Moire-Zero\Moire照片\0405_moire_out.png"
-
-    ckpt = r"C:\Codes\Moire-Zero\ckpt\MZNet_M_UHDM.pth"
+    out_path = r"C:\Codes\Moire-Zero\Moire照片\0405_moire_out.jpg"
+    ckpt = r"C:\Codes\Moire-Zero\ckpt\MZNet_S_UHDM.pth"
 
     start_time = time.time()
 
-    infer_single(ckpt, image_path, out_path)
+    infer_single(ckpt, image_path, out_path,config_filename='UHDM_s.yml',device="cuda:0", saveOnnx=False)
+    print('Inference time:', time.time() - start_time)
 
     end_time = time.time()
     elapsed_time = end_time - start_time
