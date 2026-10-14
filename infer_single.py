@@ -2,8 +2,6 @@ import argparse
 import os
 import time
 import importlib
-
-import cv2
 import yaml
 import torch
 import torch.nn.functional as F
@@ -81,9 +79,13 @@ def export_onnx(model, input_tensor, out_path, onnx_path=None):
         print("ONNX package not installed, skipping ONNX export.")
         return
 
-    if onnx_path is None:
+    if onnx_path is None or os.path.isdir(onnx_path):
         base, _ = os.path.splitext(out_path)
         onnx_path = base + ".onnx"
+
+    # 路径语义: 目标以 _fp16.onnx 结尾 -> 只导出 fp16 到该路径;
+    # 否则 -> 导出 fp32 到该路径, 并自动派生 <stem>_fp16.onnx 孪生。
+    fp16_only = os.path.basename(onnx_path).endswith("_fp16.onnx")
 
     class ONNXWrapper(torch.nn.Module):
         def __init__(self, m):
@@ -94,27 +96,67 @@ def export_onnx(model, input_tensor, out_path, onnx_path=None):
             out = self.m(x)
             return _extract_pred(out)
 
-    # Export on CPU for broader compatibility
-    wrapper = ONNXWrapper(model).cpu().float().eval()
+    # 关键: SCA 里的自定义 AvgPool2d(NAFNet Local 近似)的 kernel 窗口在 tracing 时
+    # 会被固化为常量, 导致导出图只认导出时的尺寸(H/W<=1536 直接崩溃)。
+    # 替换为真正的全局平均池化后: 1) 无 TracerWarning; 2) 任意尺寸泛化;
+    # 3) 不再有 edge/replicate 模式的 Pad, 兼容 CUDA EP / TensorRT。
+    from models.mznet import AvgPool2d
+
+    class _GlobalPool(torch.nn.Module):
+        def forward(self, x):
+            return F.adaptive_avg_pool2d(x, 1)
+
+    n_replaced = 0
+    for parent in model.modules():
+        for name, child in parent.named_children():
+            if isinstance(child, AvgPool2d):
+                setattr(parent, name, _GlobalPool())
+                n_replaced += 1
+    print(f"ONNX export: replaced {n_replaced} custom AvgPool2d with global avg pool.")
+
+    common_kwargs = dict(
+        export_params=True,
+        opset_version=17,
+        do_constant_folding=True,
+        input_names=["input"],
+        output_names=["pred"],
+        dynamic_axes={
+            "input": {0: "batch", 2: "height", 3: "width"},
+            "pred": {0: "batch", 2: "height", 3: "width"},
+        },
+        verbose=False,
+    )
+
     example_input = input_tensor.cpu().float()
 
+    if fp16_only:
+        # 只导出 fp16 到指定的 *_fp16.onnx 路径(配合 using_fp16=True 的 GPU 工作流)
+        half_wrapper = ONNXWrapper(model).cpu().half().eval()
+        with torch.no_grad():
+            torch.onnx.export(
+                half_wrapper, example_input.half(), onnx_path, **common_kwargs
+            )
+        print("FP16 ONNX saved:", onnx_path)
+        return
+
+    # Export fp32 on CPU for broader compatibility
+    wrapper = ONNXWrapper(model).cpu().float().eval()
+
     with torch.no_grad():
-        torch.onnx.export(
-            wrapper,
-            example_input,
-            onnx_path,
-            export_params=True,
-            opset_version=17,
-            do_constant_folding=True,
-            input_names=["input"],
-            output_names=["pred"],
-            dynamic_axes={
-                "input": {0: "batch", 2: "height", 3: "width"},
-                "pred": {0: "batch", 2: "height", 3: "width"},
-            },
-            verbose=False,
-        )
+        torch.onnx.export(wrapper, example_input, onnx_path, **common_kwargs)
     print("ONNX saved:", onnx_path)
+
+    # 同时导出 fp16 版本(<stem>_fp16.onnx), 供 GPU 推理使用:
+    # fp32 全尺寸激活值(单张 concat 可达 5.5GB)放不进 12GB 显存,
+    # fp16 显存减半且 GPU 走 tensor core 更快, 精度损失肉眼不可感知(实测 mean|diff| ~ 5e-4)。
+    # infer_onnx_single.py 在 device='cuda' 时会自动优先加载 *_fp16.onnx。
+    import copy as _copy
+
+    fp16_path = onnx_path.replace(".onnx", "_fp16.onnx")
+    half_wrapper = _copy.deepcopy(wrapper).half().eval()
+    with torch.no_grad():
+        torch.onnx.export(half_wrapper, example_input.half(), fp16_path, **common_kwargs)
+    print("FP16 ONNX saved:", fp16_path)
 
 
 def infer_single(
@@ -231,7 +273,7 @@ def infer_single(
     # Optional ONNX export
     if save_onnx:
         try:
-            export_onnx(model, t, out_path, onnx_path="moire.onnx")
+            export_onnx(model, t, out_path, onnx_path=onnx_path)
         except Exception as e:
             print("ONNX export failed:", e)
 
@@ -250,38 +292,32 @@ def build_parser():
 
 
 if __name__ == "__main__":
-    # args = build_parser().parse_args()
-
     total_start = time.time()
-    # infer_single(
-    #     ckpt_path=args.ckpt,
-    #     image_path=args.image,
-    #     out_path=args.out,
-    #     config_filename=args.config,
-    #     device=args.device,
-    #     save_onnx=args.save_onnx,
-    #     onnx_path=args.onnx_path,
-    #     using_fp16=args.fp16,
-    # )
+    # imgList=[img for img in os.listdir(r"C:\Users\1\Desktop\origin") if img.endswith(".tif")]
+    # renameList = [f"{os.path.splitext(i)[0]}_Demoire.tif" for i in imgList]
+    # for i in range(len(imgList)):
+    #     img = imgList[i]
+    #     out = renameList[i]
+    #     infer_single(
+    #         ckpt_path=r"ckpt/MZNet_S_UHDM.pth",
+    #         image_path=rf"C:\Users\1\Desktop\origin\{img}",
+    #         out_path=fr"C:\Users\1\Desktop\origin/{out}",
+    #         config_filename="UHDM_m_1.yml",
+    #         device="cuda:0",
+    #         save_onnx=True,
+    #         onnx_path="results",
+    #         using_fp16=False,
+    #     )
 
-
-    imgList=[img for img in os.listdir(r"C:\Users\1\Desktop\origin") if img.endswith(".tif")]
-    renameList = [f"{os.path.splitext(i)[0]}_Demoire.tif" for i in imgList]
-
-
-    for i in range(len(imgList)):
-        img = imgList[i]
-        out = renameList[i]
-        infer_single(
-            ckpt_path=r"results/ReferenceRe/ckpt/400.pth.tar",
-            image_path=rf"C:\Users\1\Desktop\origin\{img}",
-            out_path=fr"C:\Users\1\Desktop\origin/{out}",
-            config_filename="UHDM_m_1.yml",
-            device="cuda:0",
-            save_onnx=True,
-            onnx_path="results",
-            using_fp16=False,
-        )
-        break
+    infer_single(
+        ckpt_path=r"ckpt/MZNet_S_UHDM.pth",
+        image_path=rf"Moire照片/0405_moire.jpg",
+        out_path=fr"Moire照片/0405_moire_out.jpg",
+        config_filename="UHDM_s.yml",
+        device="cuda:0",
+        save_onnx=True,
+        onnx_path="ckpt/MZNet_S_UHDM_fp16.onnx",
+        using_fp16=True,
+    )
     total_elapsed = time.time() - total_start
     print(f"Total elapsed: {total_elapsed:.3f} s")
