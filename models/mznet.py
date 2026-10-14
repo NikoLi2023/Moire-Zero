@@ -683,7 +683,7 @@ class MZNet(nn.Module):
         _, _, h, w = x.size()
         mod_pad_h = (self.padder_size - h % self.padder_size) % self.padder_size
         mod_pad_w = (self.padder_size - w % self.padder_size) % self.padder_size
-        x = F.pad(x, (0, mod_pad_w, 0, mod_pad_h))
+        x = F.pad(x, (0, mod_pad_w, 0, mod_pad_h), mode="constant", value=0.) #PyTorch 导出 ONNX 时，反射填充没办法直接变成一个标准 Pad Op，会被拆成一连串 Slice+Concat 算子来模拟反射边缘，TensorRT 解析这一串 Slice 就会报维度非法错误。
         return x
 
 
