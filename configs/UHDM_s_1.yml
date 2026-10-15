@@ -25,7 +25,7 @@ training:
     seed: 42
     batch_size: 2
     accumulation_steps: 4
-    n_epochs: 700                   # The total training epochs
+    n_epochs: 100                   # The total training epochs
     validation_freq: 10000          # Validation interval
     resume: "weights/MZNet_S_UHDM.pth"                         # The checkpoint (ckpt) to resume training
     result_folder:                  # Folder for saving training results (e.g., ckpt, image)

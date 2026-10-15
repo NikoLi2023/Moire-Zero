@@ -2,6 +2,8 @@ import argparse
 import os
 import time
 import importlib
+
+import cv2
 import yaml
 import torch
 import torch.nn.functional as F
@@ -160,14 +162,14 @@ def export_onnx(model, input_tensor, out_path, onnx_path=None):
 
 
 def infer_single(
-    ckpt_path,
-    image_path,
-    out_path,
-    config_filename="UHDM_s_1.yml",
-    device=None,
-    save_onnx=False,
-    onnx_path=None,
-    using_fp16=False,
+        ckpt_path,
+        image_path,
+        out_path,
+        config_filename="UHDM_s_1.yml",
+        device=None,
+        save_onnx=False,
+        onnx_path=None,
+        using_fp16=False,
 ):
     # Load config
     with open(os.path.join("configs", config_filename), "r", encoding="utf-8") as f:
@@ -210,9 +212,9 @@ def infer_single(
     pad_w = (32 - (orig_w % 32)) % 32
     if pad_h > 0 or pad_w > 0:
         # t = F.pad(t, (0, pad_w, 0, pad_h), mode="reflect")
-        t = F.pad(t, (0, pad_w, 0, pad_h), mode="constant",value=0.0)
+        t = F.pad(t, (0, pad_w, 0, pad_h), mode="constant", value=0.0)
 
-    #创建一个Tdummy其数据结构和t一样，只是数值随机
+    # 创建一个Tdummy其数据结构和t一样，只是数值随机
     Tdummy = torch.randn_like(t)
 
     startTime = time.time()
@@ -309,6 +311,14 @@ if __name__ == "__main__":
     #         using_fp16=False,
     #     )
 
+    # image_path=rf"Moire照片/0405_moire.jpg"
+    # #resize to 2K resolution by using opencv-python
+    # srcMat=cv2.imread(image_path, cv2.IMREAD_COLOR)
+    #
+    # srcMat=cv2.resize(srcMat,dsize=(2560,1440), interpolation=cv2.INTER_LINEAR)
+    #
+    # cv2.imwrite("Moire照片/0405_moire_2K.jpg", srcMat)
+
     infer_single(
         ckpt_path=r"ckpt/MZNet_S_UHDM.pth",
         image_path=rf"Moire照片/0405_moire.jpg",
@@ -316,7 +326,7 @@ if __name__ == "__main__":
         config_filename="UHDM_s.yml",
         device="cuda:0",
         save_onnx=True,
-        onnx_path="ckpt/MZNet_S_UHDM_fp16.onnx",
+        onnx_path="ckpt/ckpt/MZNet_S_FHDMi_fp16.onnx",
         using_fp16=True,
     )
     total_elapsed = time.time() - total_start

@@ -158,9 +158,9 @@ def infer_onnx_single(
 
 
 if __name__ == "__main__":
-    onnx_file = "ckpt/MZNet_S_UHDM_fp16.onnx"
+    onnx_file = "ckpt/MZNet_S_UHDM_fp16_fp16.onnx"
     image_file = "Moire照片/0405_moire.jpg"
-    output_file = "Moire照片/0405_moire_out_cuda.jpg"
+    output_file = "Moire照片/0405_moire_out_cuda1.jpg"
     device = "cuda:0"
     start_time = time.time()
     infer_onnx_single(onnx_file, image_file, output_file,device=device)

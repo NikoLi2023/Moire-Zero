@@ -170,13 +170,25 @@ class Pipeline(object):
                 self.scheduler.step()
                 current_lr = self.optimizer.param_groups[0]['lr']
 
+        # 训练结束最终保存：training.ckpt_name 可自定义文件名（不含扩展名，自动补 .pth.tar）；
+        # 未配置时沿用 {step}.pth.tar 命名
+        ckpt_name = getattr(self.config.training, 'ckpt_name', None)
+        if ckpt_name:
+            base = str(ckpt_name)
+            if base.endswith('.pth.tar'):
+                base = base[:-len('.pth.tar')]
+        else:
+            base = f'{self.step}'
+        final_ckpt = os.path.join(self.config.training.result_folder,
+                                  self.config.data.train_dataset, 'ckpt', base)
         utils.logging.save_checkpoint({'step': self.step, 'epoch': epoch + 1,
                                     'state_dict': self.model.state_dict(),
                                     'optimizer': self.optimizer.state_dict(),
                                     'scheduler': self.scheduler.state_dict(),
                                     'params': self.args,
                                     'config': self.config},
-                                    filename=os.path.join(self.config.training.result_folder, self.config.data.train_dataset, 'ckpt', f'{self.step}'))
+                                    filename=final_ckpt)
+        return final_ckpt + '.pth.tar'
 
 
 
