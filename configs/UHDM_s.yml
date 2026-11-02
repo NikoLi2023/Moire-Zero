@@ -38,7 +38,7 @@ eval:
 optim:
     weight_decay: 0.0
     optimizer: "Adam" 
-    lr: 0.0008 
+    lr: 0.005 #0.0008,如果是16UC3 改为0.005
     amsgrad: False
     eps: 0.00000001
 

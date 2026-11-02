@@ -3,18 +3,33 @@ import re
 import glob
 import random
 
+import cv2
+import numpy as np
 import pandas as pd
 import torch
 import torch.utils.data
 from PIL import Image
 
 from datasets.data_augment import (
-    PairCompose, 
-    PairRandomCrop, 
-    PairToTensor
+    PairCompose,
+    PairRandomCropNumpy,
+    PairToTensorNumpy
 )
 
 IMG_EXTS = ('.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff')
+
+
+def imread_rgb(path):
+    """OpenCV 读图为 RGB HWC numpy 数组。支持 8UC3 / 16UC3 / 8UC4 / 16UC4(丢 alpha) / 灰度，
+    16-bit 保持 uint16 不截断；归一化（/255、/65535）由 PairToTensorNumpy 按位深完成。"""
+    img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+    if img is None:
+        raise IOError(f'无法读取图像：{path}')
+    if img.ndim == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+    elif img.shape[2] == 4:
+        img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+    return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
 
 def load_annotations(root_dir, csv_file, min_size=0):
@@ -88,11 +103,13 @@ def load_annotations(root_dir, csv_file, min_size=0):
     if not pairs:
         raise RuntimeError(f"{root_dir} 下没有满足分辨率 ≥{min_size}x{min_size} 的可训练图像。")
     print(f"=> 共 {len(pairs)} 对图像参与训练")
+    for i, (gt_rel, moire_rel) in enumerate(pairs, 1):
+        print(f"   [{i}] gt: {gt_rel}  <->  moire: {moire_rel}")
     return pd.DataFrame(pairs, columns=['gt', 'moire'])
 
 
 def _filter_small_images(pairs, root_dir, min_size):
-    """剔除分辨率低于 min_size 的配对，逐张打印被跳过的照片（PIL 只读文件头，速度快）。"""
+    """剔除分辨率低于 min_size 的配对，逐张打印被跳过的照片（优先 PIL 读文件头，失败回退 OpenCV）。"""
     kept, skipped = [], []
     for gt_rel, moire_rel in pairs:
         size_str = None
@@ -100,9 +117,15 @@ def _filter_small_images(pairs, root_dir, min_size):
             try:
                 with Image.open(os.path.join(root_dir, rel)) as im:
                     w, h = im.size
-            except Exception as e:
-                size_str = f"无法读取（{type(e).__name__}）"
-                break
+            except Exception:
+                try:
+                    img = cv2.imread(os.path.join(root_dir, rel), cv2.IMREAD_UNCHANGED)
+                    if img is None:
+                        raise IOError('cv2 读取失败')
+                    h, w = img.shape[:2]
+                except Exception as e:
+                    size_str = f"无法读取（{type(e).__name__}）"
+                    break
             if w < min_size or h < min_size:
                 size_str = f"{w}x{h}"
                 break
@@ -156,12 +179,12 @@ class UHDMMoireDataset(torch.utils.data.Dataset):
         self.patch_size = patch_size
         if self.mode=='train':
             self.transforms = PairCompose([
-                PairRandomCrop(self.patch_size),
-                PairToTensor()
+                PairRandomCropNumpy(self.patch_size),
+                PairToTensorNumpy()
             ])
         else:
             self.transforms = PairCompose([
-                PairToTensor()
+                PairToTensorNumpy()
             ])
             
     def __len__(self):
@@ -170,8 +193,8 @@ class UHDMMoireDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         gt_name = os.path.join(os.path.join(self.root_dir), self.annotations.iloc[idx, 0])
         moire_name = os.path.join(os.path.join(self.root_dir), self.annotations.iloc[idx, 1])
-        gt_image = Image.open(gt_name).convert('RGB')
-        moire_image = Image.open(moire_name).convert('RGB')
+        gt_image = imread_rgb(gt_name)
+        moire_image = imread_rgb(moire_name)
         moire_image, gt_image = self.transforms(moire_image, gt_image)
         image_id = self.annotations.iloc[idx, 0][:4]
         return torch.cat([moire_image, gt_image], dim=0), image_id
@@ -216,12 +239,12 @@ class FHDMIMoireDataset(torch.utils.data.Dataset):
         self.patch_size = patch_size
         if self.mode=='train':
             self.transforms = PairCompose([
-                PairRandomCrop(self.patch_size),
-                PairToTensor()
+                PairRandomCropNumpy(self.patch_size),
+                PairToTensorNumpy()
             ])
         else:
             self.transforms = PairCompose([
-                PairToTensor()
+                PairToTensorNumpy()
             ])
             
     def __len__(self):
@@ -230,8 +253,8 @@ class FHDMIMoireDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         gt_name = os.path.join(os.path.join(self.root_dir), self.annotations.iloc[idx, 0])
         moire_name = os.path.join(os.path.join(self.root_dir), self.annotations.iloc[idx, 1])
-        gt_image = Image.open(gt_name).convert('RGB')
-        moire_image = Image.open(moire_name).convert('RGB')
+        gt_image = imread_rgb(gt_name)
+        moire_image = imread_rgb(moire_name)
         moire_image, gt_image = self.transforms(moire_image, gt_image)
         image_id = self.annotations.iloc[idx, 0][-9:-4]
         return torch.cat([moire_image, gt_image], dim=0), image_id
@@ -275,7 +298,7 @@ class TIPMoireDataset(torch.utils.data.Dataset):
         self.mode = mode
         self.patch_size = patch_size
         self.transforms = PairCompose([
-                PairToTensor()
+                PairToTensorNumpy()
             ])
             
     def __len__(self):
@@ -284,23 +307,25 @@ class TIPMoireDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         gt_name = os.path.join(os.path.join(self.root_dir, 'target'), self.annotations.iloc[idx, 0])
         moire_name = os.path.join(os.path.join(self.root_dir, 'source'), self.annotations.iloc[idx, 1])
-        gt_image = Image.open(gt_name).convert('RGB')
-        moire_image = Image.open(moire_name).convert('RGB')
-        w, h = gt_image.size
-        
+        gt_image = imread_rgb(gt_name)
+        moire_image = imread_rgb(moire_name)
+        h, w = gt_image.shape[:2]
+
         if self.mode == 'train':
             i = random.randint(-6, 6)
             j = random.randint(-6, 6)
-            gt_image = gt_image.crop((int(w / 6) + i, int(h / 6) + j, int(w * 5 / 6) + i, int(h * 5 / 6) + j))
-            moire_image = moire_image.crop((int(w / 6) + i, int(h / 6) + j, int(w * 5 / 6) + i, int(h * 5 / 6) + j))
-            gt_image = gt_image.resize((self.patch_size, self.patch_size), Image.BILINEAR)
-            moire_image = moire_image.resize((self.patch_size, self.patch_size), Image.BILINEAR)
-            
+            box = slice(int(h / 6) + j, int(h * 5 / 6) + j), slice(int(w / 6) + i, int(w * 5 / 6) + i)
+            gt_image = gt_image[box]
+            moire_image = moire_image[box]
+            gt_image = cv2.resize(gt_image, (self.patch_size, self.patch_size), interpolation=cv2.INTER_LINEAR)
+            moire_image = cv2.resize(moire_image, (self.patch_size, self.patch_size), interpolation=cv2.INTER_LINEAR)
+
         elif self.mode == 'test':
-            gt_image = gt_image.crop((int(w / 6), int(h / 6), int(w * 5 / 6), int(h * 5 / 6)))
-            moire_image = moire_image.crop((int(w / 6), int(h / 6), int(w * 5 / 6), int(h * 5 / 6)))
-            gt_image = gt_image.resize((self.patch_size, self.patch_size), Image.BILINEAR)
-            moire_image = moire_image.resize((self.patch_size, self.patch_size), Image.BILINEAR)
+            box = slice(int(h / 6), int(h * 5 / 6)), slice(int(w / 6), int(w * 5 / 6))
+            gt_image = gt_image[box]
+            moire_image = moire_image[box]
+            gt_image = cv2.resize(gt_image, (self.patch_size, self.patch_size), interpolation=cv2.INTER_LINEAR)
+            moire_image = cv2.resize(moire_image, (self.patch_size, self.patch_size), interpolation=cv2.INTER_LINEAR)
         else:
             print('Unrecognized mode! Please select either "train" or "test"')
             raise NotImplementedError

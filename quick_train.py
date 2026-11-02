@@ -28,8 +28,11 @@ python quick_train.py --data_dir D:/mydata --train_dataset uhdm_train
   - --ckpt_name 指定训练结束时最终权重文件名（不含扩展名，自动补 .pth.tar；
     中间过程的 checkpoint 仍按 {step}.pth.tar 命名）。
   - --export_onnx 在训练结束后直接从内存模型导出真 fp16 ONNX（权重+输入输出均 float16），
-    C# 侧 UHDMSOnnxRunner 可直接加载；默认输出到结果目录、文件名为"权重名+.onnx"
-    （即 <result_folder>/<ckpt_name>.onnx）；--onnx_path 可显式指定其他输出路径。
+    C# 侧 UHDMSOnnxRunner 可直接加载；默认输出到 ckpt 文件夹的上一级（训练集目录），
+    文件名为"权重名+.onnx"；--onnx_path 可显式指定其他输出路径。
+  - ONNX 导出后会自动加密：调用项目目录下 ModelCrypto.dll（pythonnet）生成
+    "<stem>.demoire.qgAi"，并删除原 .onnx（加密失败也同样删除并记录原因，见 model_crypto.py；
+    需训练环境装有 pythonnet）。
 """
 import argparse
 import os
@@ -124,20 +127,27 @@ def main():
     print('=> 训练完成，最终权重：', final_ckpt)
 
     if args.export_onnx:
-        export_fp16_onnx(pipeline, args.onnx_path,
-                         args.ckpt_name or cfg['training']['name'],
-                         cfg['training']['result_folder'])
+        # ONNX 输出到 ckpt 文件夹的上一级（训练集目录），文件名与权重同名：
+        # 最终权重 <集目录>/ckpt/ff.pth.tar -> <集目录>/ff.onnx
+        ckpt_dir = os.path.dirname(final_ckpt)
+        out_dir = os.path.dirname(ckpt_dir)
+        ckpt_base = os.path.basename(final_ckpt)
+        if ckpt_base.endswith('.pth.tar'):
+            ckpt_base = ckpt_base[:-len('.pth.tar')]
+        else:
+            ckpt_base = os.path.splitext(ckpt_base)[0]
+        export_fp16_onnx(pipeline, args.onnx_path, ckpt_base, out_dir)
 
 
-def export_fp16_onnx(pipeline, onnx_path, base_name, result_folder):
+def export_fp16_onnx(pipeline, onnx_path, base_name, out_dir):
     """训练结束后直接从内存中的模型导出真 fp16 ONNX（与 using_fp16=True 工作流一致）。
 
-    默认输出到训练结果目录：<result_folder>/<base_name>.onnx，
-    即最终文件名为"权重名.onnx"（base_name 即 --ckpt_name）。
+    默认输出到最终权重同目录：<out_dir>/<base_name>.onnx（out_dir 即 ckpt 所在目录），
+    最终文件名为"权重名.onnx"；--onnx_path 显式指定时优先。
     """
     if onnx_path is None:
-        os.makedirs(result_folder, exist_ok=True)
-        onnx_path = os.path.join(result_folder, f'{base_name}.onnx')
+        os.makedirs(out_dir, exist_ok=True)
+        onnx_path = os.path.join(out_dir, f'{base_name}.onnx')
     else:
         out_dir = os.path.dirname(os.path.abspath(onnx_path))
         os.makedirs(out_dir, exist_ok=True)
@@ -151,9 +161,16 @@ def export_fp16_onnx(pipeline, onnx_path, base_name, result_folder):
     pipeline.model.eval()
     dummy = torch.randn(1, 3, 256, 256)  # 导出用 dummy 输入，动态尺寸由 dynamic_axes 保证
     print('=> 训练后自动导出 fp16 ONNX：', onnx_path)
-    export_onnx(pipeline.model, dummy, tmp_fp16, onnx_path=tmp_fp16)
+    export_onnx(pipeline.model, dummy, tmp_fp16, onnx_path=tmp_fp16, final_path=onnx_path)
     if os.path.abspath(tmp_fp16) != os.path.abspath(onnx_path):
         os.replace(tmp_fp16, onnx_path)
+
+    # 训练后自动加密：调用 ModelCrypto.dll -> <stem>.demoire.qgAi，并删除原 onnx（成败皆删，记日志）
+    try:
+        from model_crypto import encrypt_onnx_and_remove
+        encrypt_onnx_and_remove(onnx_path)
+    except Exception as e:
+        print('ONNX 加密流程异常：', type(e).__name__, e)
 
 
 if __name__ == '__main__':

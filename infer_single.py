@@ -4,6 +4,7 @@ import time
 import importlib
 
 import cv2
+import numpy as np
 import yaml
 import torch
 import torch.nn.functional as F
@@ -76,7 +77,9 @@ def _extract_pred(out):
     return out
 
 
-def export_onnx(model, input_tensor, out_path, onnx_path=None):
+def export_onnx(model, input_tensor, out_path, onnx_path=None, final_path=None):
+    """final_path：日志中展示的最终文件名。训练后自动导出会先写到临时 *_fp16.onnx
+    再改名为"权重名.onnx"，传入 final_path 让日志打印真实的最终文件名。"""
     if importlib.util.find_spec("onnx") is None:
         print("ONNX package not installed, skipping ONNX export.")
         return
@@ -138,7 +141,7 @@ def export_onnx(model, input_tensor, out_path, onnx_path=None):
             torch.onnx.export(
                 half_wrapper, example_input.half(), onnx_path, **common_kwargs
             )
-        print("FP16 ONNX saved:", onnx_path)
+        print("Model Saved:", final_path or onnx_path)
         return
 
     # Export fp32 on CPU for broader compatibility
@@ -198,9 +201,13 @@ def infer_single(
     print("Loading checkpoint:", ckpt_path)
     load_checkpoint_to_model(ckpt_path, model, dev)
 
-    # Load image
-    img = Image.open(image_path).convert("RGB")
-    t = transforms.ToTensor()(img).unsqueeze(0).to(dev)  # [1, 3, H, W]
+    # Load image（OpenCV 读图：8UC3 / 16UC3 / 16UC4 均可，按位深归一化到 [0,1]）
+    from datasets.dataset import imread_rgb
+    arr_in = imread_rgb(image_path)
+    input_is_16bit = arr_in.dtype == np.uint16
+    scale = 65535.0 if input_is_16bit else 255.0
+    t = torch.from_numpy(np.ascontiguousarray(arr_in.transpose(2, 0, 1))).float() \
+        .div(scale).unsqueeze(0).to(dev)  # [1, 3, H, W]
 
     # For pure FP16 path, convert input dtype
     if use_fp16:
@@ -267,9 +274,14 @@ def infer_single(
     elapsed = time.time() - start
     print(f"Inference elapsed3: {elapsed:.3f} s")
 
-    # Save image
+    # Save image（16-bit 输入且输出为无损格式时按 16-bit 保存，避免精度损失）
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
-    tvu.save_image(pred.float(), out_path)
+    if input_is_16bit and out_path.lower().endswith(('.png', '.tif', '.tiff')):
+        out_np = (pred.float().squeeze(0).permute(1, 2, 0).cpu().numpy() * 65535.0) \
+            .round().astype(np.uint16)
+        cv2.imwrite(out_path, cv2.cvtColor(out_np, cv2.COLOR_RGB2BGR))
+    else:
+        tvu.save_image(pred.float(), out_path)
     print("Saved:", out_path)
 
     # Optional ONNX export

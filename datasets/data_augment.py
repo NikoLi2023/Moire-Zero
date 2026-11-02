@@ -1,4 +1,7 @@
 import random
+
+import numpy as np
+import torch
 import torchvision.transforms as transforms
 import torchvision.transforms.functional as F
 
@@ -70,3 +73,43 @@ class PairToTensor(transforms.ToTensor):
             Tensor: Converted image.
         """
         return F.to_tensor(pic), F.to_tensor(label)
+
+
+class PairRandomCropNumpy:
+    """numpy(HWC) 图像的成对随机裁剪，语义同 torchvision RandomCrop（图小于裁剪尺寸时边缘补边）。"""
+
+    def __init__(self, size):
+        self.size = (size, size) if isinstance(size, int) else size
+
+    def __call__(self, image, label):
+        th, tw = self.size
+        h, w = image.shape[:2]
+        if h < th or w < tw:
+            pad_h = max(th - h, 0)
+            pad_w = max(tw - w, 0)
+            image = np.pad(image, ((0, pad_h), (0, pad_w), (0, 0)), mode='edge')
+            label = np.pad(label, ((0, pad_h), (0, pad_w), (0, 0)), mode='edge')
+            h, w = image.shape[:2]
+        i = random.randint(0, h - th)
+        j = random.randint(0, w - tw)
+        return image[i:i + th, j:j + tw], label[i:i + th, j:j + tw]
+
+
+class PairToTensorNumpy:
+    """numpy(HWC, uint8/uint16/float) -> CHW float32 [0,1]，按位深归一化：
+    uint8 除以 255，uint16 除以 65535，浮点直接裁剪到 [0,1]。
+    与训练网络的 [0,1] 输入空间约定保持一致，16-bit 照片信息无损进入训练。"""
+
+    def __call__(self, pic, label):
+        return self._to_tensor(pic), self._to_tensor(label)
+
+    @staticmethod
+    def _to_tensor(a):
+        a = np.ascontiguousarray(a)
+        if a.dtype == np.uint8:
+            scale = 255.0
+        elif a.dtype == np.uint16:
+            scale = 65535.0
+        else:
+            return torch.from_numpy(a.transpose(2, 0, 1)).float().clamp_(0.0, 1.0)
+        return torch.from_numpy(a.transpose(2, 0, 1)).float().div_(scale)
