@@ -220,6 +220,7 @@ class TrainUI(tk.Tk):
         cv.bind('<Leave>', lambda _e: (cv.config(bg=C_HDR), _draw()))
         cv.bind('<Button-1>', lambda _e: command())
         cv.pack(side='right')
+        _draw()   # 初始绘制，避免打开窗口时按钮图标空白（仅在悬停后才显示）
         if kind == 'max':
             self._max_icon_redraw = _draw   # 最大化/还原后刷新图标
         return cv
