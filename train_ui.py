@@ -39,6 +39,9 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))  # 仓库根目录（qui
 # 日志固定目录：不存在时自动创建；文件名 DemoireTrain-YYYYMMDD.txt
 LOG_DIR = r'C:\GQI Data\OptiWorks\UserData'
 
+# 软件版本号（显示在状态栏右下角）
+APP_VERSION = '1.0.0.1'
+
 # ---------------- 深色主题配色（参照 GQ 系工具：深紫标题栏 + 深灰卡片 + 蓝/绿点缀） ----------------
 C_BG       = '#1E1F24'   # 窗口主背景
 C_CARD     = '#2A2B31'   # 分组卡片背景
@@ -492,6 +495,8 @@ class TrainUI(tk.Tk):
         tk.Frame(bar, bg=C_CARD_BD, height=1).pack(fill='x')
         tk.Label(bar, textvariable=self.status_var, bg=C_CARD, fg=C_TEXT_DIM,
                  font=(FONT_UI, 9)).pack(side='left', padx=8, pady=3)
+        tk.Label(bar, text=f'Version: {APP_VERSION}', bg=C_CARD, fg='#6E7078',
+                 font=(FONT_UI, 9)).pack(side='right', padx=28, pady=3)   # 右侧让出缩放手柄位置
 
     # ---------------- 日志 ----------------
     def append_log(self, text, tag=None):
