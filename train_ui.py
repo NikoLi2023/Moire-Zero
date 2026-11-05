@@ -20,7 +20,7 @@ Print 输出实时呈现在界面上。
   - 训练结束后始终自动导出 fp16 ONNX 到 ckpt 文件夹的上一级（训练集目录），
     即 <结果目录>/<训练集目录名>/<任务权重名>.onnx，无需勾选；
   - ONNX 导出后自动调用项目目录下 ModelCrypto.dll 加密为
-    "<任务权重名>.demoire.qgAi"（与 ONNX 同目录），
+    "<任务权重名>.demoire.gqAi"（与 ONNX 同目录），
     并删除原 .onnx（加密失败也同样删除并记录原因，见 model_crypto.py）；
   - 训练在独立子进程中运行（与 UI 解耦，停止按钮可安全终止），stdout/stderr 实时流式显示；
   - 界面日志中的 tqdm 进度条按行刷新显示。
@@ -229,17 +229,25 @@ class TrainUI(tk.Tk):
         return cv
 
     def _minimize(self):
-        # override-redirect 窗口无法直接 iconify：临时恢复系统边框最小化，
-        # 还原时由 <Map> 事件把无边框样式补回来（见 _on_mapped）
-        self.overrideredirect(False)
-        self.iconify()
+        # override-redirect 窗口无法直接 iconify：先恢复普通窗口样式并 update()
+        # 强制 Windows 应用样式（否则最小化后任务栏无图标、无法还原），再 iconify。
+        # _minimizing 守卫：防止 update() 触发的 <Map> 事件把无边框样式又补回去。
+        # 还原时由 <Map> 事件恢复无边框样式（见 _on_mapped）。
+        self._minimizing = True
+        try:
+            self.overrideredirect(False)
+            self.update()
+            self.iconify()
+        finally:
+            self._minimizing = False
 
     def _on_mapped(self, _e):
-        if not self._maximized:
-            try:
-                self.overrideredirect(True)
-            except tk.TclError:
-                pass
+        if getattr(self, '_minimizing', False) or self._maximized:
+            return
+        try:
+            self.overrideredirect(True)
+        except tk.TclError:
+            pass
 
     def _toggle_max(self):
         if self._maximized:

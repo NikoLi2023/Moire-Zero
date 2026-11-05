@@ -31,7 +31,7 @@ python quick_train.py --data_dir D:/mydata --train_dataset uhdm_train
     C# 侧 UHDMSOnnxRunner 可直接加载；默认输出到 ckpt 文件夹的上一级（训练集目录），
     文件名为"权重名+.onnx"；--onnx_path 可显式指定其他输出路径。
   - ONNX 导出后会自动加密：调用项目目录下 ModelCrypto.dll（pythonnet）生成
-    "<stem>.demoire.qgAi"，并删除原 .onnx（加密失败也同样删除并记录原因，见 model_crypto.py；
+    "<stem>.demoire.gqAi"，并删除原 .onnx（加密失败也同样删除并记录原因，见 model_crypto.py；
     需训练环境装有 pythonnet）。
 """
 import argparse
@@ -165,7 +165,7 @@ def export_fp16_onnx(pipeline, onnx_path, base_name, out_dir):
     if os.path.abspath(tmp_fp16) != os.path.abspath(onnx_path):
         os.replace(tmp_fp16, onnx_path)
 
-    # 训练后自动加密：调用 ModelCrypto.dll -> <stem>.demoire.qgAi，并删除原 onnx（成败皆删，记日志）
+    # 训练后自动加密：调用 ModelCrypto.dll -> <stem>.demoire.gqAi，并删除原 onnx（成败皆删，记日志）
     try:
         from model_crypto import encrypt_onnx_and_remove
         encrypt_onnx_and_remove(onnx_path)

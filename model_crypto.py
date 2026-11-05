@@ -5,7 +5,7 @@
     ModelCrypto.ModelCrypto.EncryptFunc(string inputModelFile, string outputModelFile)
 
 约定：
-  1. 加密产物命名为 "<stem>.demoire.qgAi"；
+  1. 加密产物命名为 "<stem>.demoire.gqAi"；
   2. 加密成功后删除原 .onnx；
   3. 加密失败（DLL 缺失 / pythonnet 异常 / EncryptFunc 返回 False）同样删除原 .onnx，
      并把失败原因打印到日志 —— 调用方（quick_train.py，经 train_ui.py 的 DailyLogWriter）
@@ -56,7 +56,7 @@ def encrypt_onnx_and_remove(onnx_path):
     """
     onnx_path = os.path.abspath(onnx_path)
     stem, _ = os.path.splitext(onnx_path)
-    enc_path = stem + '.demoire.qgAi'
+    enc_path = stem + '.demoire.gqAi'
 
     if not os.path.isfile(onnx_path):
         print(f'[Crypto] 待加密文件不存在，跳过：{onnx_path}')
